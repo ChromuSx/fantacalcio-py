@@ -20,19 +20,50 @@ def get_giocatori_urls() -> list:
     giocatori_urls = []
     if not os.path.exists(config.GIOCATORI_URLS_FILE):
         logger.debug("Scraping player URLs from FPEDIA...")
-        for ruolo in tqdm(config.RUOLI):
+        
+        # Aggiungiamo un counter per vedere quanti giocatori per ruolo
+        stats_per_ruolo = {}
+        
+        for ruolo in config.RUOLI:  # Rimuoviamo tqdm qui per vedere meglio cosa succede
             url = config.FPEDIA_URL + ruolo.lower() + "/"
+            logger.info(f"Scraping ruolo: {ruolo} - URL: {url}")
+            
             try:
                 response = requests.get(url, headers=config.HEADERS)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.content, "html.parser")
-                for giocatore in soup.find_all("article"):
-                    calciatore_url = giocatore.find("a").get("href")
-                    if calciatore_url:
-                        giocatori_urls.append(calciatore_url)
+                
+                # Contiamo quanti articoli troviamo
+                articles = soup.find_all("article")
+                logger.info(f"Trovati {len(articles)} articoli per {ruolo}")
+                
+                ruolo_urls = []
+                for giocatore in articles:
+                    link = giocatore.find("a")
+                    if link:
+                        calciatore_url = link.get("href")
+                        if calciatore_url:
+                            giocatori_urls.append(calciatore_url)
+                            ruolo_urls.append(calciatore_url)
+                    else:
+                        logger.debug(f"Nessun link trovato in un articolo per {ruolo}")
+                
+                stats_per_ruolo[ruolo] = len(ruolo_urls)
+                logger.info(f"Aggiunti {len(ruolo_urls)} giocatori per {ruolo}")
+                
+                # Piccola pausa tra un ruolo e l'altro per non sovraccaricare il server
+                time.sleep(1)
+                
             except requests.exceptions.RequestException as e:
                 logger.error(f"Failed to retrieve URLs for role '{ruolo}': {e}")
                 continue
+            except Exception as e:
+                logger.error(f"Unexpected error for role '{ruolo}': {e}")
+                continue
+        
+        # Mostriamo il riepilogo
+        logger.info(f"Riepilogo giocatori per ruolo: {stats_per_ruolo}")
+        logger.info(f"Totale giocatori trovati: {len(giocatori_urls)}")
 
         if not giocatori_urls:
             logger.warning(
@@ -40,14 +71,13 @@ def get_giocatori_urls() -> list:
                 "The website structure may have changed, or the request was blocked."
             )
         else:
-            # FIX: Specifica encoding UTF-8 per gestire caratteri speciali
+            # Salviamo il file
             with open(config.GIOCATORI_URLS_FILE, "w", encoding="utf-8") as fp:
                 for item in giocatori_urls:
                     fp.write(f"{item}\n")
-            logger.debug(f"{len(giocatori_urls)} player URLs saved.")
+            logger.info(f"{len(giocatori_urls)} player URLs saved to {config.GIOCATORI_URLS_FILE}")
     else:
         logger.debug("Reading player URLs from cache.")
-        # FIX: Specifica encoding UTF-8 anche in lettura
         with open(config.GIOCATORI_URLS_FILE, "r", encoding="utf-8") as fp:
             giocatori_urls = fp.readlines()
     return [url.strip() for url in giocatori_urls]
@@ -190,7 +220,6 @@ def scrape_fpedia():
                 logger.error(f"{url} generated an exception: {exc}")
 
     df = pd.DataFrame(giocatori)
-    # FIX: Anche pandas deve usare UTF-8 per salvare il CSV
     df.to_csv(config.GIOCATORI_CSV, index=False, encoding="utf-8")
     logger.debug("FPEDIA data saved to CSV.")
 
@@ -235,7 +264,6 @@ def fetch_FSTATS_data():
         players_data = response.json()["results"]
 
         df = pd.DataFrame(players_data)
-        # FIX: Specifica encoding UTF-8 anche qui
         df.to_csv(config.PLAYERS_CSV, index=False, sep=";", encoding="utf-8")
         logger.debug("FSTATS data saved to CSV.")
     except requests.exceptions.RequestException as e:
