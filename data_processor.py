@@ -17,7 +17,8 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
         and os.path.getsize(config.GIOCATORI_CSV) > 0
     ):
         try:
-            df_fpedia = pd.read_csv(config.GIOCATORI_CSV)
+            # FIX: Specifica encoding UTF-8 per leggere correttamente caratteri speciali
+            df_fpedia = pd.read_csv(config.GIOCATORI_CSV, encoding="utf-8")
             logger.debug("FPEDIA DataFrame loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading {config.GIOCATORI_CSV}: {e}")
@@ -26,7 +27,8 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     if os.path.exists(config.PLAYERS_CSV) and os.path.getsize(config.PLAYERS_CSV) > 0:
         try:
-            df_FSTATS = pd.read_csv(config.PLAYERS_CSV, sep=";")
+            # FIX: Specifica encoding UTF-8 anche qui
+            df_FSTATS = pd.read_csv(config.PLAYERS_CSV, sep=";", encoding="utf-8")
             logger.debug("FSTATS DataFrame loaded successfully.")
         except Exception as e:
             logger.error(f"Error loading {config.PLAYERS_CSV}: {e}")

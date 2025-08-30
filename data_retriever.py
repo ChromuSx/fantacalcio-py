@@ -40,13 +40,15 @@ def get_giocatori_urls() -> list:
                 "The website structure may have changed, or the request was blocked."
             )
         else:
-            with open(config.GIOCATORI_URLS_FILE, "w") as fp:
+            # FIX: Specifica encoding UTF-8 per gestire caratteri speciali
+            with open(config.GIOCATORI_URLS_FILE, "w", encoding="utf-8") as fp:
                 for item in giocatori_urls:
                     fp.write(f"{item}\n")
             logger.debug(f"{len(giocatori_urls)} player URLs saved.")
     else:
         logger.debug("Reading player URLs from cache.")
-        with open(config.GIOCATORI_URLS_FILE, "r") as fp:
+        # FIX: Specifica encoding UTF-8 anche in lettura
+        with open(config.GIOCATORI_URLS_FILE, "r", encoding="utf-8") as fp:
             giocatori_urls = fp.readlines()
     return [url.strip() for url in giocatori_urls]
 
@@ -188,7 +190,8 @@ def scrape_fpedia():
                 logger.error(f"{url} generated an exception: {exc}")
 
     df = pd.DataFrame(giocatori)
-    df.to_csv(config.GIOCATORI_CSV, index=False)
+    # FIX: Anche pandas deve usare UTF-8 per salvare il CSV
+    df.to_csv(config.GIOCATORI_CSV, index=False, encoding="utf-8")
     logger.debug("FPEDIA data saved to CSV.")
 
 
@@ -232,7 +235,8 @@ def fetch_FSTATS_data():
         players_data = response.json()["results"]
 
         df = pd.DataFrame(players_data)
-        df.to_csv(config.PLAYERS_CSV, index=False, sep=";")
+        # FIX: Specifica encoding UTF-8 anche qui
+        df.to_csv(config.PLAYERS_CSV, index=False, sep=";", encoding="utf-8")
         logger.debug("FSTATS data saved to CSV.")
     except requests.exceptions.RequestException as e:
         logger.error(f"FSTATS data fetch failed: {e}")
