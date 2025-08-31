@@ -3,6 +3,7 @@ import pandas as pd
 from loguru import logger
 import config
 import os
+import re
 
 
 def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -50,7 +51,7 @@ def process_fpedia_data(df: pd.DataFrame) -> pd.DataFrame:
     numeric_cols = [
         f"Fantamedia anno {config.ANNO_CORRENTE-2}-{config.ANNO_CORRENTE-1}",
         f"Fantamedia anno {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
-        f"Presenze {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",  # Campo effettivo
+        f"Presenze {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
         "Presenze campionato corrente",
         f"FM su tot gare {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
         "Punteggio",
@@ -64,7 +65,6 @@ def process_fpedia_data(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         else:
-            # Solo per campi davvero importanti mostra warning
             if col in [f"Fantamedia anno {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}", 
                       "Presenze campionato corrente", "Punteggio"]:
                 logger.warning(
@@ -84,13 +84,38 @@ def process_fpedia_data(df: pd.DataFrame) -> pd.DataFrame:
 def process_FSTATS_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Processes and cleans the DataFrame from FSTATS.
-    It renames the original columns to a consistent format.
+    It renames the original columns to a consistent format and fixes squad format.
     """
     if df.empty:
         logger.warning("FSTATS DataFrame is empty. Skipping processing.")
         return df
 
     logger.debug("Processing FSTATS data...")
+
+    # FIX: Correggi il formato delle squadre PRIMA di tutto
+    def fix_team_format(team_value):
+        """Estrae il nome della squadra dal formato JSON"""
+        if pd.isna(team_value):
+            return ""
+        
+        team_str = str(team_value)
+        
+        # Se è già una stringa normale
+        if not '{' in team_str:
+            return team_str.capitalize()
+        
+        # Se è un dizionario come stringa, estrai il nome
+        match = re.search(r"'name':\s*'([^']+)'", team_str)
+        if match:
+            team_name = match.group(1)
+            # Capitalizza correttamente
+            return team_name.capitalize()
+        
+        # Se è un vero dizionario
+        if isinstance(team_value, dict) and 'name' in team_value:
+            return team_value['name'].capitalize()
+        
+        return str(team_value)
 
     # Rename columns for clarity and consistency
     rename_map = {
@@ -102,6 +127,11 @@ def process_FSTATS_data(df: pd.DataFrame) -> pd.DataFrame:
         "fantacalcioRanking": "fanta_avg",
     }
     df = df.rename(columns=rename_map)
+    
+    # FIX SQUADRE SUBITO DOPO IL RENAME
+    if 'Squadra' in df.columns:
+        df['Squadra'] = df['Squadra'].apply(fix_team_format)
+        logger.debug(f"Fixed team formats. Example teams: {df['Squadra'].head(5).tolist()}")
 
     numeric_cols = [
         "goals",
