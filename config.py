@@ -15,6 +15,8 @@ GIOCATORI_CSV = os.path.join(DATA_DIR, "_giocatori.csv")
 PLAYERS_CSV = os.path.join(DATA_DIR, "_players.csv")
 CONVENIENZA_CSV = os.path.join(OUTPUT_DIR, "convenienza.csv")
 OUTPUT_EXCEL = os.path.join(OUTPUT_DIR, "fantacalcio_analysis.xlsx")
+# File quotazioni
+QUOTAZIONI_FILE = os.path.join(DATA_DIR, "Quotazioni_Fantacalcio_Stagione_2025_26.xlsx")
 
 # URLS
 ANNO_CORRENTE = 2025

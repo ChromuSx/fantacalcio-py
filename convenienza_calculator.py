@@ -1,10 +1,10 @@
-# convenienza_calculator.py
+# convenienza_calculator.py - VERSIONE AGGIORNATA
 import pandas as pd
 import ast
 from loguru import logger
 from config import ANNO_CORRENTE
 
-# --- Funzioni per FPEDIA ---
+# --- Funzioni per FPEDIA con QUOTAZIONI ---
 
 skills_mapping = {
     "Fuoriclasse": 1,
@@ -23,21 +23,18 @@ skills_mapping = {
 
 def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcola due indici di convenienza per i dati di FPEDIA:
-    1. 'Convenienza': basata sulle performance stagionali (presenze, fantamedia).
-    2. 'Convenienza Potenziale': basata sul valore intrinseco del giocatore (Punteggio, Skills),
-       utile soprattutto a inizio campionato o con poche presenze.
-    
-    Nota: Non avendo le presenze della stagione precedente, usiamo la fantamedia come proxy.
+    Calcola tre indici di convenienza per i dati di FPEDIA:
+    1. 'Convenienza': rapporto performance/quotazione (il più importante per l'asta)
+    2. 'Convenienza Potenziale': basata su potenziale e skills
+    3. 'Valore_su_Prezzo': indice diretto fantamedia/quotazione
     """
     if df.empty:
         logger.warning("DataFrame FPEDIA è vuoto. Calcolo saltato.")
         return df
 
-    # --- Calcolo Convenienza (basata su presenze) ---
-    res_convenienza = []
     df_calc = df.copy()
-
+    
+    # Assicurati che le colonne numeriche siano nel formato corretto
     numeric_cols = [
         f"Fantamedia anno {ANNO_CORRENTE-2}-{ANNO_CORRENTE-1}",
         f"Fantamedia anno {ANNO_CORRENTE-1}-{ANNO_CORRENTE}",
@@ -47,170 +44,195 @@ def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
         "Punteggio",
         "Buon investimento",
         "Resistenza infortuni",
+        "quotazione_attuale",  # NUOVO: quotazione reale
+        "fantavoto_medio",      # NUOVO: FVM dal file quotazioni
     ]
+    
     for col in numeric_cols:
-        df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
-
+        if col in df_calc.columns:
+            df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
+    
+    # Se non c'è la quotazione, usa un default basato sul punteggio
+    if 'quotazione_attuale' not in df_calc.columns:
+        logger.warning("Quotazioni non trovate, uso stima basata su Punteggio")
+        df_calc['quotazione_attuale'] = (df_calc['Punteggio'] / 100 * 30).clip(lower=1)
+    
+    # --- 1. CONVENIENZA CLASSICA (Performance/Prezzo) ---
+    res_convenienza = []
     giocatemax = df_calc["Presenze campionato corrente"].max()
     if giocatemax == 0:
         giocatemax = 1
 
     for _, row in df_calc.iterrows():
-        appetibilita = 0
-        fantamedia_prec = row.get(
-            f"Fantamedia anno {ANNO_CORRENTE-2}-{ANNO_CORRENTE-1}", 0
-        )
-        fantamedia_corr = row.get(
-            f"Fantamedia anno {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0
-        )
-        presenze_corr = row.get(f"Presenze {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
-        if presenze_corr == 0:  # Fallback se il campo non esiste
-            presenze_corr = row.get("Presenze campionato corrente", 0)
+        quotazione = row.get('quotazione_attuale', 10)
+        if quotazione == 0:
+            quotazione = 1  # Evita divisione per zero
         
+        # Calcola il valore del giocatore basato su performance
+        valore_performance = 0
+        
+        # Fantamedia pesata per presenze
+        fantamedia_corr = row.get(f"Fantamedia anno {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
         fm_su_tot = row.get(f"FM su tot gare {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
-        punteggio = row.get("Punteggio", 1)
-
-        # Calcolo appetibilità basato sui dati disponibili
-        # Se abbiamo la fantamedia della stagione precedente, assumiamo che abbia giocato
-        # almeno il 50% delle partite se FM > 0
-        if fantamedia_prec > 0:
-            # Stima conservativa: se ha una fantamedia, ha giocato almeno 15-20 partite
-            partite_prec_stimate = 20 if fantamedia_prec > 5.5 else 15
-            appetibilita += fantamedia_prec * (partite_prec_stimate / 38) * 0.20
+        presenze_corr = row.get(f"Presenze {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
         
-        # Usa FM su tot gare se disponibile, altrimenti fantamedia normale
-        if fm_su_tot > 0:
-            fantamedia_effettiva = fm_su_tot
-        else:
-            fantamedia_effettiva = fantamedia_corr
-            
+        fantamedia_effettiva = fm_su_tot if fm_su_tot > 0 else fantamedia_corr
+        
         if presenze_corr > 5:
-            appetibilita += fantamedia_effettiva * (presenze_corr / giocatemax) * 0.80
-        elif fantamedia_prec > 0:
-            # Se ha poche presenze quest'anno ma aveva una buona media l'anno scorso
-            appetibilita = fantamedia_prec * 0.6
-
-        appetibilita = appetibilita * punteggio * 0.30
-        pt = punteggio if punteggio != 0 else 1
-        appetibilita = (appetibilita / pt) * 100 / 40
-
-        # Gestione skills
+            valore_performance = fantamedia_effettiva * (presenze_corr / 38)
+        
+        # Aggiungi bonus da skills
         try:
             skills_list = ast.literal_eval(row.get("Skills", "[]"))
-            plus = sum(skills_mapping.get(skill, 0) for skill in skills_list)
-            appetibilita += plus
-        except (ValueError, SyntaxError):
+            skill_bonus = sum(skills_mapping.get(skill, 0) for skill in skills_list) * 0.5
+            valore_performance += skill_bonus
+        except:
             pass
-
-        # Bonus e malus
-        if row.get("Nuovo acquisto", False):
-            appetibilita -= 2
-        if row.get("Buon investimento", 0) == 60:
-            appetibilita += 3
-        if row.get("Consigliato prossima giornata", False):
-            appetibilita += 1
-        if row.get("Trend", "") == "UP":
-            appetibilita += 2
-        if row.get("Infortunato", False):
-            appetibilita -= 1
+        
+        # Bonus/malus vari
+        if row.get("Buon investimento", 0) > 60:
+            valore_performance += 1
         if row.get("Resistenza infortuni", 0) > 60:
-            appetibilita += 4
-        elif row.get("Resistenza infortuni", 0) == 60:
-            appetibilita += 2
-
-        res_convenienza.append(appetibilita)
-
+            valore_performance += 1
+        if row.get("Infortunato", False):
+            valore_performance -= 2
+        if row.get("Trend", "") == "UP":
+            valore_performance += 1
+        
+        # CONVENIENZA = Valore Performance / Quotazione * 100
+        convenienza = (valore_performance / quotazione) * 100
+        res_convenienza.append(convenienza)
+    
     df["Convenienza"] = res_convenienza
-    logger.debug("Indice 'Convenienza' calcolato per FPEDIA.")
-
-    # --- Calcolo Convenienza Potenziale (indipendente da presenze) ---
+    
+    # --- 2. VALORE SU PREZZO (indice semplice ma efficace) ---
+    # Questo è l'indice più diretto: fantamedia/prezzo
+    df['Valore_su_Prezzo'] = 0
+    mask = df_calc['quotazione_attuale'] > 0
+    
+    # Usa FVM se disponibile, altrimenti FM su tot gare
+    if 'fantavoto_medio' in df_calc.columns:
+        fm_da_usare = df_calc['fantavoto_medio'].where(
+            df_calc['fantavoto_medio'] > 0, 
+            df_calc[f"FM su tot gare {ANNO_CORRENTE-1}-{ANNO_CORRENTE}"]
+        )
+    else:
+        fm_da_usare = df_calc[f"FM su tot gare {ANNO_CORRENTE-1}-{ANNO_CORRENTE}"]
+    
+    df.loc[mask, 'Valore_su_Prezzo'] = (fm_da_usare[mask] / df_calc.loc[mask, 'quotazione_attuale']) * 100
+    
+    # --- 3. CONVENIENZA POTENZIALE (per giocatori con poche presenze) ---
     res_potenziale = []
     for _, row in df_calc.iterrows():
-        potenziale = row.get("Punteggio", 0)
+        quotazione = row.get('quotazione_attuale', 10)
+        if quotazione == 0:
+            quotazione = 1
+        
+        # Base: punteggio FPEDIA + FVM dal file quotazioni
+        potenziale = row.get("Punteggio", 50) / 10  # Normalizza a 0-10
+        
+        # Se abbiamo il FVM dalle quotazioni, usalo
+        if 'fantavoto_medio' in row and row['fantavoto_medio'] > 0:
+            potenziale += row['fantavoto_medio'] / 10
+        
+        # Bonus skills (più peso nel potenziale)
         try:
             skills_list = ast.literal_eval(row.get("Skills", "[]"))
-            plus = sum(skills_mapping.get(skill, 0) for skill in skills_list)
-            potenziale += plus * 2  # Diamo più peso alle skill nel potenziale
-        except (ValueError, SyntaxError):
+            potenziale += sum(skills_mapping.get(skill, 0) for skill in skills_list)
+        except:
             pass
-        res_potenziale.append(potenziale)
-
+        
+        # Calcola convenienza potenziale
+        convenienza_pot = (potenziale / quotazione) * 100
+        res_potenziale.append(convenienza_pot)
+    
     df["Convenienza Potenziale"] = res_potenziale
-    logger.debug("Indice 'Convenienza Potenziale' calcolato per FPEDIA.")
-
+    
+    logger.info("Indici di convenienza calcolati con quotazioni reali")
+    
+    # Log delle top 5 occasioni per Valore/Prezzo
+    top_vsp = df.nlargest(5, 'Valore_su_Prezzo')[['Nome', 'Squadra', 'quotazione_attuale', 'Valore_su_Prezzo']]
+    logger.info(f"Top 5 Valore/Prezzo:\n{top_vsp}")
+    
     return df
-
-
-# --- Funzioni per FSTATS ---
 
 
 def calcola_convenienza_FSTATS(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcola due indici di convenienza per i dati di FSTATS:
-    1. 'Convenienza': basata sulle performance stagionali (presenze, fantamedia).
-    2. 'Convenienza Potenziale': basata sul valore intrinseco (fantacalcioFantaindex) e potenziale
-       statistico (xG, xA), utile soprattutto a inizio campionato.
+    Calcola la convenienza per FSTATS usando le quotazioni reali.
     """
     if df.empty:
         logger.warning("DataFrame FSTATS è vuoto. Calcolo saltato.")
         return df
 
     df_calc = df.copy()
+    
+    # Colonne numeriche incluse le quotazioni
     numeric_cols = [
-        "goals",
-        "assists",
-        "yellowCards",
-        "redCards",
-        "xgFromOpenPlays",
-        "xA",
-        "presences",
-        "fanta_avg",
-        "fantacalcioFantaindex",
+        "goals", "assists", "yellowCards", "redCards",
+        "xgFromOpenPlays", "xA", "presences", 
+        "fanta_avg", "fantacalcioFantaindex",
+        "quotazione_attuale", "fantavoto_medio"
     ]
+    
     for col in numeric_cols:
-        df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
-
-    # --- Calcolo Convenienza (basata su presenze) ---
-    df_con_presenze = df_calc[df_calc["presences"] > 0].reset_index(drop=True)
+        if col in df_calc.columns:
+            df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
+    
+    # Default quotazione se mancante
+    if 'quotazione_attuale' not in df_calc.columns:
+        logger.warning("Quotazioni non trovate per FSTATS, uso default")
+        df_calc['quotazione_attuale'] = 10
+    
+    # Assicurati che non ci siano quotazioni zero
+    df_calc['quotazione_attuale'] = df_calc['quotazione_attuale'].replace(0, 1)
+    
+    # --- CONVENIENZA basata su performance/prezzo ---
+    df_con_presenze = df_calc[df_calc["presences"] > 0].copy()
+    
     if not df_con_presenze.empty:
+        # Calcola valore totale del giocatore
         bonus_score = (df_con_presenze["goals"] * 3) + (df_con_presenze["assists"] * 1)
-        malus_score = (df_con_presenze["yellowCards"] * 0.5) + (
-            df_con_presenze["redCards"] * 1
+        malus_score = (df_con_presenze["yellowCards"] * 0.5) + (df_con_presenze["redCards"] * 1)
+        
+        # Valore per presenza
+        valore_per_presenza = (
+            df_con_presenze["fanta_avg"] + 
+            (bonus_score / df_con_presenze["presences"]) -
+            (malus_score / df_con_presenze["presences"])
         )
-        bonus_per_presence = bonus_score / df_con_presenze["presences"]
-        malus_per_presence = malus_score / df_con_presenze["presences"]
-        potential_score = (
-            df_con_presenze["xgFromOpenPlays"] + df_con_presenze["xA"]
-        ) / df_con_presenze["presences"]
-
-        convenienza = (
-            df_con_presenze["fanta_avg"] * 0.6
-            + bonus_per_presence * 0.25
-            + potential_score * 0.15
-            - malus_per_presence * 0.2
-        )
-        df_con_presenze["Convenienza"] = (
-            (convenienza / convenienza.max()) * 100 if not convenienza.empty else 0
-        )
+        
+        # Convenienza = valore / quotazione
+        df_con_presenze["Convenienza"] = (valore_per_presenza / df_con_presenze["quotazione_attuale"]) * 100
+        
+        # Merge back
         df = df.merge(df_con_presenze[["Nome", "Convenienza"]], on="Nome", how="left")
-        logger.debug("Indice 'Convenienza' calcolato per FSTATS.")
     else:
         df["Convenienza"] = 0
-        logger.warning(
-            "Nessun giocatore con presenze in FSTATS. 'Convenienza' impostata a 0."
-        )
-
-    # --- Calcolo Convenienza Potenziale (indipendente da presenze) ---
-    potential_stats = (
-        df_calc["xgFromOpenPlays"] + df_calc["xA"]
-    ) * 2  # Pondera il potenziale xG/xA
-    potenziale = df_calc["fantacalcioFantaindex"] + potential_stats
-
-    df_calc["Convenienza Potenziale"] = (
-        (potenziale / potenziale.max()) * 100 if not potenziale.empty else 0
+    
+    # --- VALORE SU PREZZO semplice ---
+    mask = df_calc['quotazione_attuale'] > 0
+    df['Valore_su_Prezzo'] = 0
+    
+    # Usa fantavoto_medio se disponibile, altrimenti fanta_avg
+    fm_da_usare = df_calc['fantavoto_medio'].where(
+        df_calc['fantavoto_medio'] > 0,
+        df_calc['fanta_avg']
+    ) if 'fantavoto_medio' in df_calc.columns else df_calc['fanta_avg']
+    
+    df.loc[mask, 'Valore_su_Prezzo'] = (fm_da_usare[mask] / df_calc.loc[mask, 'quotazione_attuale']) * 100
+    
+    # --- CONVENIENZA POTENZIALE con xG e xA ---
+    potential_value = (
+        df_calc["fantacalcioFantaindex"] / 10 +  # Normalizza l'index
+        (df_calc["xgFromOpenPlays"] + df_calc["xA"]) * 2  # Peso alto per expected stats
     )
-    df = df.merge(df_calc[["Nome", "Convenienza Potenziale"]], on="Nome", how="left")
-    logger.debug("Indice 'Convenienza Potenziale' calcolato per FSTATS.")
-
-    df.fillna({"Convenienza": 0, "Convenienza Potenziale": 0}, inplace=True)
+    
+    df["Convenienza Potenziale"] = (potential_value / df_calc["quotazione_attuale"]) * 100
+    
+    # Fill NaN
+    df.fillna({"Convenienza": 0, "Convenienza Potenziale": 0, "Valore_su_Prezzo": 0}, inplace=True)
+    
+    logger.info("Convenienza FSTATS calcolata con quotazioni reali")
+    
     return df
