@@ -38,7 +38,7 @@ def main():
 
         df_final = df_final.sort_values(by="Convenienza Potenziale", ascending=False)
 
-        # Define a comprehensive and ordered list of columns for the final output
+        # Lista aggiornata con i campi effettivamente disponibili
         output_columns = [
             # Key Info
             "Nome",
@@ -50,10 +50,17 @@ def main():
             "Punteggio",
             # Current Season Stats
             f"Fantamedia anno {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
-            f"Presenze campionato corrente",
+            f"Presenze {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
+            f"FM su tot gare {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
+            f"Fanta Media {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
+            "Presenze campionato corrente",
             # Previous Season Stats
             f"Fantamedia anno {config.ANNO_CORRENTE-2}-{config.ANNO_CORRENTE-1}",
-            "Partite giocate",
+            f"Fantamedia anno {config.ANNO_CORRENTE-3}-{config.ANNO_CORRENTE-2}",
+            # Predicted Stats
+            "Presenze previste",
+            "Gol previsti",
+            "Assist previsti",
             # Qualitative Info
             "Trend",
             "Skills",
@@ -61,22 +68,10 @@ def main():
             "Buon investimento",
             "Resistenza infortuni",
             "Infortunato",
-            # Legacy
-            f"FM su tot gare {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
-            "Presenze previste",
-            "Gol previsti",
-            "Assist previsti",
-            "Ruolo",
-            "Skills",
-            "Buon investimento",
-            "Resistenza infortuni",
-            "Consigliato prossima giornata",
             "Nuovo acquisto",
-            "Infortunato",
-            "Squadra",
-            "Trend",
-            "Presenze campionato corrente",
         ]
+        
+        # Filtra solo le colonne che esistono effettivamente
         final_columns = [col for col in output_columns if col in df_final.columns]
 
         output_path = os.path.join(config.OUTPUT_DIR, "fpedia_analysis.xlsx")
@@ -118,7 +113,7 @@ def main():
             # Disciplinary
             "yellowCards",
             "redCards",
-            # Legacy
+            # Other available fields (will be included if present)
             "injured",
             "banned",
             "mantra_position",
@@ -132,18 +127,11 @@ def main():
             "mins_played",
             "pagella",
             "fantacalcioRanking",
-            "fantacalcioFantaindex",
             "fantacalcioPosition",
-            "assists",
-            "goals",
             "goals90min",
             "goalsFromOpenPlays",
-            "xgFromOpenPlays",
             "xgFromOpenPlays/90min",
-            "xA",
             "xA90min",
-            "redCards",
-            "yellowCards",
             "successfulPenalties",
             "penalties",
             "gkPenaltiesSaved",

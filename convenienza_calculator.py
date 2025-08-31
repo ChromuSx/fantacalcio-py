@@ -27,6 +27,8 @@ def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
     1. 'Convenienza': basata sulle performance stagionali (presenze, fantamedia).
     2. 'Convenienza Potenziale': basata sul valore intrinseco del giocatore (Punteggio, Skills),
        utile soprattutto a inizio campionato o con poche presenze.
+    
+    Nota: Non avendo le presenze della stagione precedente, usiamo la fantamedia come proxy.
     """
     if df.empty:
         logger.warning("DataFrame FPEDIA è vuoto. Calcolo saltato.")
@@ -38,8 +40,9 @@ def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
 
     numeric_cols = [
         f"Fantamedia anno {ANNO_CORRENTE-2}-{ANNO_CORRENTE-1}",
-        "Partite giocate",
         f"Fantamedia anno {ANNO_CORRENTE-1}-{ANNO_CORRENTE}",
+        f"Presenze {ANNO_CORRENTE-1}-{ANNO_CORRENTE}",
+        f"FM su tot gare {ANNO_CORRENTE-1}-{ANNO_CORRENTE}",
         "Presenze campionato corrente",
         "Punteggio",
         "Buon investimento",
@@ -57,24 +60,41 @@ def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
         fantamedia_prec = row.get(
             f"Fantamedia anno {ANNO_CORRENTE-2}-{ANNO_CORRENTE-1}", 0
         )
-        partite_prec = row.get("Partite giocate", 0)
         fantamedia_corr = row.get(
             f"Fantamedia anno {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0
         )
-        partite_corr = row.get("Presenze campionato corrente", 0)
+        presenze_corr = row.get(f"Presenze {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
+        if presenze_corr == 0:  # Fallback se il campo non esiste
+            presenze_corr = row.get("Presenze campionato corrente", 0)
+        
+        fm_su_tot = row.get(f"FM su tot gare {ANNO_CORRENTE-1}-{ANNO_CORRENTE}", 0)
         punteggio = row.get("Punteggio", 1)
 
-        if partite_prec > 0:
-            appetibilita += fantamedia_prec * (partite_prec / 38) * 0.20
-        if partite_corr > 5:
-            appetibilita += fantamedia_corr * (partite_corr / giocatemax) * 0.80
-        elif partite_prec > 0:
-            appetibilita = fantamedia_prec * (partite_prec / 38)
+        # Calcolo appetibilità basato sui dati disponibili
+        # Se abbiamo la fantamedia della stagione precedente, assumiamo che abbia giocato
+        # almeno il 50% delle partite se FM > 0
+        if fantamedia_prec > 0:
+            # Stima conservativa: se ha una fantamedia, ha giocato almeno 15-20 partite
+            partite_prec_stimate = 20 if fantamedia_prec > 5.5 else 15
+            appetibilita += fantamedia_prec * (partite_prec_stimate / 38) * 0.20
+        
+        # Usa FM su tot gare se disponibile, altrimenti fantamedia normale
+        if fm_su_tot > 0:
+            fantamedia_effettiva = fm_su_tot
+        else:
+            fantamedia_effettiva = fantamedia_corr
+            
+        if presenze_corr > 5:
+            appetibilita += fantamedia_effettiva * (presenze_corr / giocatemax) * 0.80
+        elif fantamedia_prec > 0:
+            # Se ha poche presenze quest'anno ma aveva una buona media l'anno scorso
+            appetibilita = fantamedia_prec * 0.6
 
         appetibilita = appetibilita * punteggio * 0.30
         pt = punteggio if punteggio != 0 else 1
         appetibilita = (appetibilita / pt) * 100 / 40
 
+        # Gestione skills
         try:
             skills_list = ast.literal_eval(row.get("Skills", "[]"))
             plus = sum(skills_mapping.get(skill, 0) for skill in skills_list)
@@ -82,6 +102,7 @@ def calcola_convenienza_fpedia(df: pd.DataFrame) -> pd.DataFrame:
         except (ValueError, SyntaxError):
             pass
 
+        # Bonus e malus
         if row.get("Nuovo acquisto", False):
             appetibilita -= 2
         if row.get("Buon investimento", 0) == 60:

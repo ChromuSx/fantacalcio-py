@@ -17,7 +17,6 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
         and os.path.getsize(config.GIOCATORI_CSV) > 0
     ):
         try:
-            # FIX: Specifica encoding UTF-8 per leggere correttamente caratteri speciali
             df_fpedia = pd.read_csv(config.GIOCATORI_CSV, encoding="utf-8")
             logger.debug("FPEDIA DataFrame loaded successfully.")
         except Exception as e:
@@ -27,7 +26,6 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     if os.path.exists(config.PLAYERS_CSV) and os.path.getsize(config.PLAYERS_CSV) > 0:
         try:
-            # FIX: Specifica encoding UTF-8 anche qui
             df_FSTATS = pd.read_csv(config.PLAYERS_CSV, sep=";", encoding="utf-8")
             logger.debug("FSTATS DataFrame loaded successfully.")
         except Exception as e:
@@ -48,24 +46,30 @@ def process_fpedia_data(df: pd.DataFrame) -> pd.DataFrame:
 
     logger.debug("Processing FPEDIA data...")
 
+    # Lista aggiornata senza 'Partite giocate' che non esiste
     numeric_cols = [
         f"Fantamedia anno {config.ANNO_CORRENTE-2}-{config.ANNO_CORRENTE-1}",
-        "Partite giocate",
         f"Fantamedia anno {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
+        f"Presenze {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",  # Campo effettivo
         "Presenze campionato corrente",
+        f"FM su tot gare {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}",
         "Punteggio",
         "Nuovo acquisto",
         "Buon investimento",
         "Consigliato prossima giornata",
         "Resistenza infortuni",
     ]
+    
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         else:
-            logger.warning(
-                f"Column '{col}' not found in FPEDIA data. It will be created with value 0."
-            )
+            # Solo per campi davvero importanti mostra warning
+            if col in [f"Fantamedia anno {config.ANNO_CORRENTE-1}-{config.ANNO_CORRENTE}", 
+                      "Presenze campionato corrente", "Punteggio"]:
+                logger.warning(
+                    f"Column '{col}' not found in FPEDIA data. It will be created with value 0."
+                )
             df[col] = 0
 
     if "Skills" not in df.columns:
@@ -92,14 +96,13 @@ def process_FSTATS_data(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
         "name": "Nome",
         "team": "Squadra",
-        "fantacalcioPosition": "Ruolo",  # Using the specific fantacalcio role
+        "fantacalcioPosition": "Ruolo",
         "appearances": "presences",
         "pagella": "avg",
         "fantacalcioRanking": "fanta_avg",
     }
     df = df.rename(columns=rename_map)
 
-    # Define the list of columns that should be numeric, using the NEW names
     numeric_cols = [
         "goals",
         "assists",
@@ -117,7 +120,6 @@ def process_FSTATS_data(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         else:
-            # This warning should now only appear for genuinely missing columns
             logger.warning(
                 f"Column '{col}' not found in FSTATS data. It will be created with value 0."
             )
